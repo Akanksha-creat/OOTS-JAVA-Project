@@ -1,0 +1,401 @@
+// SimpleCompilerGUIWithSteps.java
+// Swing GUI that shows tokens, parsed expression (AST), and result.
+//
+// Compile: javac SimpleCompilerGUIWithSteps.java
+// Run:     java SimpleCompilerGUIWithSteps
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.util.*;
+import java.util.List;
+
+public class SimpleCompilerGUIWithSteps {
+    private JFrame frame;
+    private JTextField display;
+    private JTextArea infoArea; // shows tokens, parsed expression, result
+
+    public SimpleCompilerGUIWithSteps() {
+        frame = new JFrame("Simple Compiler - Expression Evaluator (with steps)");
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setSize(720, 520);
+        frame.setLocationRelativeTo(null);
+
+        display = new JTextField();
+        display.setFont(new Font("SansSerif", Font.BOLD, 24));
+        display.setHorizontalAlignment(SwingConstants.RIGHT);
+        display.addActionListener(e -> evaluateExpression());
+
+        // Info area to show compiler steps (tokens, parsed expression, result)
+        infoArea = new JTextArea();
+        infoArea.setEditable(false);
+        infoArea.setFont(new Font("Monospaced", Font.PLAIN, 14));
+        infoArea.setLineWrap(true);
+        infoArea.setWrapStyleWord(true);
+        JScrollPane infoScroll = new JScrollPane(infoArea);
+
+        JPanel leftPanel = new JPanel(new BorderLayout(8, 8));
+        leftPanel.add(display, BorderLayout.NORTH);
+
+        JPanel buttonPanel = new JPanel(new GridLayout(6, 4, 6, 6));
+        String[] buttons = {
+            "C", "DEL", "(", ")",
+            "7", "8", "9", "/",
+            "4", "5", "6", "*",
+            "1", "2", "3", "-",
+            "0", ".", "^", "+",
+            "", "", "=", ""
+        };
+
+        for (String label : buttons) {
+            if (label.equals("")) {
+                buttonPanel.add(new JLabel());
+                continue;
+            }
+            JButton btn = new JButton(label);
+            btn.setFont(new Font("SansSerif", Font.PLAIN, 20));
+            btn.addActionListener(e -> onButtonPress(label));
+            buttonPanel.add(btn);
+        }
+
+        leftPanel.add(buttonPanel, BorderLayout.CENTER);
+
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, infoScroll);
+        split.setDividerLocation(360);
+        split.setResizeWeight(0.5);
+
+        frame.setLayout(new BorderLayout(8, 8));
+        frame.add(split, BorderLayout.CENTER);
+        frame.getRootPane().setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        frame.setVisible(true);
+
+        // initial compiler info text
+        infoArea.setText("Compiler Working Steps:\n\n" +
+                "1) Enter an arithmetic expression (supports + - * / ^ unary +/- and parentheses).\n" +
+                "2) Press '=' or Enter to evaluate.\n\n" +
+                "The panel below will show:\n- Tokens (lexical analysis)\n- Parsed expression (syntax tree in parenthesized infix form)\n- Result (evaluation)\n");
+    }
+
+    private void onButtonPress(String label) {
+        switch (label) {
+            case "C":
+                display.setText("");
+                infoArea.setText("");
+                break;
+            case "DEL":
+                String t = display.getText();
+                if (!t.isEmpty()) display.setText(t.substring(0, t.length() - 1));
+                break;
+            case "=":
+                evaluateExpression();
+                break;
+            default:
+                display.setText(display.getText() + label);
+        }
+    }
+
+    private void evaluateExpression() {
+        String expr = display.getText().trim();
+        if (expr.isEmpty()) return;
+
+        try {
+            // 1) Tokenize (and show tokens)
+            Tokenizer tokenizer = new Tokenizer(expr);
+            List<Token> tokens = tokenizer.tokenizeAll();
+            StringBuilder sb = new StringBuilder();
+            sb.append("Input: ").append(expr).append("\n\n");
+            sb.append("Tokens: ");
+            for (Token tk : tokens) {
+                sb.append(tk).append(" ");
+            }
+            sb.append("\n\n");
+
+            // Recreate tokenizer for parser (parser uses its own tokenizer instance)
+            Parser parser = new Parser(expr);
+            Node ast = parser.parse(); // returns AST root
+
+            sb.append("Parsed Expression (parenthesized):\n");
+            sb.append(ast.toInfixString()).append("\n\n");
+
+            // Evaluate AST
+            double result = ast.evaluate();
+
+            sb.append("Result: ");
+            if (Math.abs(result - Math.round(result)) < 1e-12) {
+                sb.append((long)Math.round(result));
+            } else {
+                sb.append(result);
+            }
+
+            infoArea.setText(sb.toString());
+            display.setText(sb.toString().contains("Result: ") ? display.getText() : display.getText()); // don't clear
+        } catch (ArithmeticException ae) {
+            infoArea.setText("Error: " + ae.getMessage());
+            display.setText("Error: " + ae.getMessage());
+        } catch (RuntimeException re) {
+            infoArea.setText("Error: " + re.getMessage());
+            display.setText("Error: " + re.getMessage());
+        } catch (Exception e) {
+            infoArea.setText("Error: " + e.getMessage());
+            display.setText("Error: " + e.getMessage());
+        }
+    }
+
+    // --------------------- Tokenizer ---------------------
+    private static class Tokenizer {
+        private final String s;
+        private int pos = 0;
+
+        Tokenizer(String s) { this.s = s; }
+
+        public List<Token> tokenizeAll() {
+            List<Token> out = new ArrayList<>();
+            skipWhitespace();
+            while (pos < s.length()) {
+                char c = s.charAt(pos);
+                if (c == '+') { out.add(new Token(TokenType.PLUS, "+")); pos++; }
+                else if (c == '-') { out.add(new Token(TokenType.MINUS, "-")); pos++; }
+                else if (c == '') { out.add(new Token(TokenType.MUL, "")); pos++; }
+                else if (c == '/') { out.add(new Token(TokenType.DIV, "/")); pos++; }
+                else if (c == '^') { out.add(new Token(TokenType.POW, "^")); pos++; }
+                else if (c == '(') { out.add(new Token(TokenType.LPAREN, "(")); pos++; }
+                else if (c == ')') { out.add(new Token(TokenType.RPAREN, ")")); pos++; }
+                else if (Character.isDigit(c) || c == '.') {
+                    int start = pos;
+                    boolean dotSeen = (c == '.');
+                    pos++;
+                    while (pos < s.length()) {
+                        char cc = s.charAt(pos);
+                        if (Character.isDigit(cc)) pos++;
+                        else if (cc == '.' && !dotSeen) { dotSeen = true; pos++; }
+                        else break;
+                    }
+                    String numStr = s.substring(start, pos);
+                    out.add(new Token(TokenType.NUMBER, numStr));
+                } else if (Character.isWhitespace(c)) {
+                    pos++;
+                } else {
+                    throw new RuntimeException("Unexpected character in tokenization: '" + c + "' at " + pos);
+                }
+                skipWhitespace();
+            }
+            out.add(new Token(TokenType.EOF, "<EOF>"));
+            return out;
+        }
+
+        private void skipWhitespace() {
+            while (pos < s.length() && Character.isWhitespace(s.charAt(pos))) pos++;
+        }
+    }
+
+    // --------------------- Tokens ---------------------
+    private enum TokenType { NUMBER, PLUS, MINUS, MUL, DIV, POW, LPAREN, RPAREN, EOF }
+
+    private static class Token {
+        TokenType type;
+        String text; // for display; NUMBER keeps number string
+
+        Token(TokenType t, String txt) { type = t; text = txt; }
+        public String toString() {
+            if (type == TokenType.NUMBER) return "[NUM:" + text + "]";
+            return "[" + text + "]";
+        }
+    }
+
+    // --------------------- Parser producing AST ---------------------
+    private static class Parser {
+        private final String s;
+        private int pos = 0;
+        private Token current;
+
+        Parser(String s) {
+            this.s = s;
+            advance(); // set current
+        }
+
+        // advance to next token (simple tokenizer on the fly)
+        private void advance() {
+            skipWhitespace();
+            if (pos >= s.length()) { current = new Token(TokenType.EOF, "<EOF>"); return; }
+            char c = s.charAt(pos);
+            if (c == '+') { pos++; current = new Token(TokenType.PLUS, "+"); return; }
+            if (c == '-') { pos++; current = new Token(TokenType.MINUS, "-"); return; }
+            if (c == '') { pos++; current = new Token(TokenType.MUL, ""); return; }
+            if (c == '/') { pos++; current = new Token(TokenType.DIV, "/"); return; }
+            if (c == '^') { pos++; current = new Token(TokenType.POW, "^"); return; }
+            if (c == '(') { pos++; current = new Token(TokenType.LPAREN, "("); return; }
+            if (c == ')') { pos++; current = new Token(TokenType.RPAREN, ")"); return; }
+            if (Character.isDigit(c) || c == '.') {
+                int start = pos;
+                boolean dotSeen = (c == '.');
+                pos++;
+                while (pos < s.length()) {
+                    char cc = s.charAt(pos);
+                    if (Character.isDigit(cc)) pos++;
+                    else if (cc == '.' && !dotSeen) { dotSeen = true; pos++; }
+                    else break;
+                }
+                String numStr = s.substring(start, pos);
+                current = new Token(TokenType.NUMBER, numStr);
+                return;
+            }
+            throw new RuntimeException("Unexpected character '" + c + "' at position " + pos);
+        }
+
+        private void skipWhitespace() {
+            while (pos < s.length() && Character.isWhitespace(s.charAt(pos))) pos++;
+        }
+
+        private void eat(TokenType expected) {
+            if (current.type != expected) throw new RuntimeException("Expected " + expected + " but found " + current.type);
+            advance();
+        }
+
+        // public parse returns AST root
+        public Node parse() {
+            Node node = parseExpression();
+            if (current.type != TokenType.EOF) throw new RuntimeException("Unexpected token after expression: " + current);
+            return node;
+        }
+
+        // expression = term { ('+' | '-') term }
+        private Node parseExpression() {
+            Node x = parseTerm();
+            while (current.type == TokenType.PLUS || current.type == TokenType.MINUS) {
+                TokenType op = current.type;
+                advance();
+                Node right = parseTerm();
+                x = new BinaryOpNode(op, x, right);
+            }
+            return x;
+        }
+
+        // term = factor { ('*' | '/') factor }
+        private Node parseTerm() {
+            Node x = parseFactor();
+            while (current.type == TokenType.MUL || current.type == TokenType.DIV) {
+                TokenType op = current.type;
+                advance();
+                Node right = parseFactor();
+                x = new BinaryOpNode(op, x, right);
+            }
+            return x;
+        }
+
+        // factor = unary [ '^' factor ]   (right-assoc)
+        private Node parseFactor() {
+            Node left = parseUnary();
+            if (current.type == TokenType.POW) {
+                advance();
+                Node right = parseFactor();
+                return new BinaryOpNode(TokenType.POW, left, right);
+            }
+            return left;
+        }
+
+        // unary = ('+' | '-') unary | primary
+        private Node parseUnary() {
+            if (current.type == TokenType.PLUS) {
+                advance();
+                return parseUnary(); // unary +, ignore
+            } else if (current.type == TokenType.MINUS) {
+                advance();
+                Node child = parseUnary();
+                return new UnaryOpNode(TokenType.MINUS, child);
+            } else return parsePrimary();
+        }
+
+        // primary = NUMBER | '(' expression ')'
+        private Node parsePrimary() {
+            if (current.type == TokenType.NUMBER) {
+                double val;
+                try {
+                    val = Double.parseDouble(current.text);
+                } catch (NumberFormatException e) {
+                    throw new RuntimeException("Invalid number: " + current.text);
+                }
+                advance();
+                return new NumberNode(val);
+            } else if (current.type == TokenType.LPAREN) {
+                advance();
+                Node inside = parseExpression();
+                if (current.type != TokenType.RPAREN) throw new RuntimeException("Missing closing ')'");
+                advance();
+                return inside;
+            } else {
+                throw new RuntimeException("Unexpected token: " + current);
+            }
+        }
+    }
+
+    // --------------------- AST Node types ---------------------
+    private interface Node {
+        double evaluate();
+        String toInfixString();
+    }
+
+    private static class NumberNode implements Node {
+        private final double value;
+        NumberNode(double v) { value = v; }
+        public double evaluate() { return value; }
+        public String toInfixString() {
+            if (Math.abs(value - Math.round(value)) < 1e-12) return Long.toString(Math.round(value));
+            return Double.toString(value);
+        }
+    }
+
+    private static class UnaryOpNode implements Node {
+        private final TokenType op;
+        private final Node child;
+        UnaryOpNode(TokenType op, Node child) { this.op = op; this.child = child; }
+        public double evaluate() {
+            double v = child.evaluate();
+            if (op == TokenType.MINUS) return -v;
+            return v; // unary plus
+        }
+        public String toInfixString() {
+            if (op == TokenType.MINUS) return "(-" + child.toInfixString() + ")";
+            return "(+" + child.toInfixString() + ")";
+        }
+    }
+
+    private static class BinaryOpNode implements Node {
+        private final TokenType op;
+        private final Node left, right;
+        BinaryOpNode(TokenType op, Node left, Node right) { this.op = op; this.left = left; this.right = right; }
+
+        public double evaluate() {
+            double a = left.evaluate();
+            double b = right.evaluate();
+            switch (op) {
+                case PLUS: return a + b;
+                case MINUS: return a - b;
+                case MUL: return a * b;
+                case DIV:
+                    if (b == 0.0) throw new ArithmeticException("Division by zero");
+                    return a / b;
+                case POW: return Math.pow(a, b);
+                default: throw new RuntimeException("Unknown binary op: " + op);
+            }
+        }
+
+        public String toInfixString() {
+            String opSym;
+            switch (op) {
+                case PLUS: opSym = " + "; break;
+                case MINUS: opSym = " - "; break;
+                case MUL: opSym = " * "; break;
+                case DIV: opSym = " / "; break;
+                case POW: opSym = " ^ "; break;
+                default: opSym = " ? ";
+            }
+            // parenthesize to reflect AST grouping
+            return "(" + left.toInfixString() + opSym + right.toInfixString() + ")";
+        }
+    }
+
+    // --------------------- Main ---------------------
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(SimpleCompilerGUIWithSteps::new);
+    }
+}
